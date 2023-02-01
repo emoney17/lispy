@@ -36,8 +36,17 @@ int main(int argc, char *argv[])
         // add input to add_history to record the input
         add_history(input);
 
-        // echo input
-        printf("%s\n", input);
+        // attempt to parse input
+        mpc_result_t r;
+        if (mpc_parse("<stdin>", input, Lispy, &r)) {
+            // on success print the ast
+            mpc_ast_print(r.output);
+            mpc_ast_delete(r.output);
+        } else {
+            // otherwise print an error
+            mpc_err_print(r.error);
+            mpc_err_delete(r.error);
+        }
 
         // free retreived input
         free(input);
