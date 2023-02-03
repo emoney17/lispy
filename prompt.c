@@ -85,36 +85,6 @@ void lval_del(lval* v)
     free(v);
 }
 
-lval* lval_read_num(mpc_ast_t* t)
-{
-    errno = 0;
-    long x = strtol(t->contents, NULL, 10);
-    return errno != ERANGE ?
-        lval_num(x) : lval_err("invalid number");
-}
-
-lval* lval_read(mpc_ast_t* t)
-{
-    // if synbol or number return conversion to that type
-    if (strstr(t->tag, "number")) return lval_read_num(t);
-    if (strstr(t->tag, "symbol")) return lval_sym(t->contents);
-
-    // if root (>) or sexpr then create empty list
-    lval* x = NULL;
-    if (strcmp(t->tag, ">") == 0) x = lval_sexpr();
-    if (strcmp(t->tag, "sexpr")) x = lval_sexpr();
-
-    // fill this list with any valid expression contained within
-    for (int i = 0; i < t->children_num; i++) {
-        if (strcmp(t->children[i]->contents, "(") == 0) continue;
-        if (strcmp(t->children[i]->contents, ")") == 0) continue;
-        if (strcmp(t->children[i]->tag, "regex") == 0) continue;
-        x = lval_add(x, lval_read(t->children[i]));
-    }
-
-    return x;
-}
-
 lval* lval_add(lval* v, lval* x)
 {
     v->count++;
@@ -122,6 +92,31 @@ lval* lval_add(lval* v, lval* x)
     v->cell[v->count-1] = x;
     return v;
 }
+
+lval* lval_pop(lval* v, int i)
+{
+    // find the iotem at i
+    lval* x = v->cell[i];
+
+    // shift memory after the item at i over the top
+    memmove(&v->cell[i], &v->cell[i+1], sizeof(lval*) * (v->count-i-1));
+
+    // decrease the count of items in th list
+    v->count--;
+
+    // reallocate the memory used
+    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+    return x;
+}
+
+lval* lval_take(lval* v, int i)
+{
+    lval* x = lval_pop(v, i);
+    lval_del(v);
+    return x;
+}
+
+void lval_print(lval* v);
 
 void lval_expr_print(lval* v, char open, char close)
 {
@@ -153,69 +148,6 @@ void lval_println(lval* v)
 {
     lval_print(v);
     putchar('\n');
-}
-
-lval* lval_eval_sexpr(lval* v)
-{
-    // eval children
-    for (int i = 0; i < v->count; i++) {
-        v->cell[i] = lval_eval(v->cell[i]);
-    }
-
-    // error checking
-    for (int i = 0; i < v->count; i++) {
-        if (v->cell[i]->type == LVAL_ERR) return lval_take(v, i);
-    }
-
-    // empty expression
-    if (v->count == 0) return v;
-
-    // single expression
-    if (v->count == 1) return lval_take(v, 0);
-
-    // ensure first element is a symbol
-    lval* f - lval_pop(v, 0);
-    if (f->type != LVAL_SYM) {
-        lval_del(f);
-        lval_del(v);
-        return lval_err("S-expression does not start with a symbol");
-    }
-
-    // call builtin with operator
-    lval* results = builtin_op(v, f->sym);
-    lval_del(f);
-    return result;
-}
-
-lval* lval_eval(lval* v)
-{
-    // evaluate s expressions
-    if (v->type == LVAL_SEXPR) return lval_eval_sexpr(v);
-    // all other lval types remain the same
-    return v;
-}
-
-lval* lval_pop(lval* v, int i)
-{
-    // find the iotem at i
-    lval* x = v->cell[i];
-
-    // shift memory after the item at i over the top
-    memmove(&v->cell[i], &v->cell[i+1], sizeof(lval*) * (v->count-i-1));
-
-    // decrease the count of items in th list
-    v->count--;
-
-    // reallocate the memory used
-    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
-    return x;
-}
-
-lval* lval_take(lval* v, int i)
-{
-    lval* x = lval_pop(v, i);
-    lval_del(v);
-    return x;
 }
 
 lval* builtin_op(lval* a, char* op)
@@ -255,6 +187,78 @@ lval* builtin_op(lval* a, char* op)
     }
 
     lval_del(a);
+    return x;
+}
+
+lval* lval_eval(lval* v);
+
+lval* lval_eval_sexpr(lval* v)
+{
+    // eval children
+    for (int i = 0; i < v->count; i++) {
+        v->cell[i] = lval_eval(v->cell[i]);
+    }
+
+    // error checking
+    for (int i = 0; i < v->count; i++) {
+        if (v->cell[i]->type == LVAL_ERR) return lval_take(v, i);
+    }
+
+    // empty expression
+    if (v->count == 0) return v;
+
+    // single expression
+    if (v->count == 1) return lval_take(v, 0);
+
+    // ensure first element is a symbol
+    lval* f = lval_pop(v, 0);
+    if (f->type != LVAL_SYM) {
+        lval_del(f);
+        lval_del(v);
+        return lval_err("S-expression does not start with a symbol");
+    }
+
+    // call builtin with operator
+    lval* result = builtin_op(v, f->sym);
+    lval_del(f);
+    return result;
+}
+
+lval* lval_eval(lval* v)
+{
+    // evaluate s expressions
+    if (v->type == LVAL_SEXPR) return lval_eval_sexpr(v);
+    // all other lval types remain the same
+    return v;
+}
+
+lval* lval_read_num(mpc_ast_t* t)
+{
+    errno = 0;
+    long x = strtol(t->contents, NULL, 10);
+    return errno != ERANGE ?
+        lval_num(x) : lval_err("invalid number");
+}
+
+lval* lval_read(mpc_ast_t* t)
+{
+    // if synbol or number return conversion to that type
+    if (strstr(t->tag, "number")) return lval_read_num(t);
+    if (strstr(t->tag, "symbol")) return lval_sym(t->contents);
+
+    // if root (>) or sexpr then create empty list
+    lval* x = NULL;
+    if (strcmp(t->tag, ">") == 0) x = lval_sexpr();
+    if (strcmp(t->tag, "sexpr")) x = lval_sexpr();
+
+    // fill this list with any valid expression contained within
+    for (int i = 0; i < t->children_num; i++) {
+        if (strcmp(t->children[i]->contents, "(") == 0) continue;
+        if (strcmp(t->children[i]->contents, ")") == 0) continue;
+        if (strcmp(t->children[i]->tag, "regex") == 0) continue;
+        x = lval_add(x, lval_read(t->children[i]));
+    }
+
     return x;
 }
 
@@ -306,6 +310,7 @@ int main(int argc, char *argv[])
             lval* x = lval_eval(lval_read(r.output));
             lval_println(x);
             lval_del(x);
+            mpc_ast_delete(r.output);
         } else {
             // otherwise print an error
             mpc_err_print(r.error);
